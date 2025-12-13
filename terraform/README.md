@@ -1,13 +1,14 @@
-# RAG Agent Infrastructure - Simple Deployment
+# RAG Agent Infrastructure - Automated Deployment
 
-Single EC2 instance + S3 bucket. That's it.
+Fully automated EC2 + S3 deployment. Run from any machine with AWS credentials (or an EC2 with admin IAM role).
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────┐
 │              EC2 Instance               │
-│            (t3.medium)                  │
+│            (Ubuntu 24.04)               │
+│             (t3.medium)                 │
 │                                         │
 │  ┌─────────────┐  ┌─────────────────┐   │
 │  │  RAG API    │  │     Redis       │   │
@@ -37,71 +38,111 @@ Single EC2 instance + S3 bucket. That's it.
 - S3: ~$1/month
 - Elastic IP: Free (when attached)
 
-## Prerequisites
+## Deploy from Agent Machine (EC2 with Admin Role)
 
-1. AWS CLI configured
-2. Terraform installed
-3. SSH key pair in AWS
-
-## Deploy
+If running from an EC2 with admin IAM role, no credentials are needed:
 
 ```bash
-# 1. Copy variables
+# Clone the repo (if not already done)
+git clone https://github.com/guybass/rag-agent-infra-api.git
+cd rag-agent-infra-api/terraform
+
+# Initialize Terraform
+terraform init
+
+# Deploy (no tfvars needed - uses defaults)
+terraform apply
+```
+
+## Deploy from Local Machine
+
+```bash
+# 1. Configure AWS credentials
+aws configure
+
+# 2. Clone and enter terraform directory
+git clone https://github.com/guybass/rag-agent-infra-api.git
+cd rag-agent-infra-api/terraform
+
+# 3. Copy and edit variables (optional)
 cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars if you want to customize
 
-# 2. Edit terraform.tfvars
-#    - Set your key_name
-#    - Set allowed_ssh_cidr to your IP
-
-# 3. Deploy
+# 4. Deploy
 terraform init
 terraform apply
 ```
 
-## Setup Application
+## Variables
 
-After `terraform apply`, follow the output instructions:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `aws_region` | us-east-1 | AWS region |
+| `project_name` | rag-agent | Resource naming prefix |
+| `instance_type` | t3.medium | EC2 instance type |
+| `key_name` | "" | SSH key (empty = SSM-only) |
+| `github_repo_url` | guybass/rag-agent-infra-api | Repo to clone |
+| `github_branch` | main | Branch to deploy |
+
+## Outputs
+
+After `terraform apply`, you'll see:
+
+```
+api_url          = "http://<IP>:8000"
+health_check_url = "http://<IP>:8000/health"
+api_docs_url     = "http://<IP>:8000/docs"
+ssm_connect      = "aws ssm start-session --target i-xxxxx"
+```
+
+## Connect to Instance
+
+**Via SSM (recommended - no SSH key needed):**
+```bash
+aws ssm start-session --target <instance-id>
+```
+
+**Via SSH (if key_name was set):**
+```bash
+ssh -i ~/.ssh/your-key.pem ubuntu@<public-ip>
+```
+
+## Verify Deployment
+
+The instance auto-deploys on boot. Check status:
 
 ```bash
-# SSH into instance
-ssh -i ~/.ssh/your-key.pem ec2-user@<PUBLIC_IP>
+# View setup log
+cat /var/log/user-data.log
 
-# Clone repo
-cd /opt/rag-agent
-git clone https://github.com/your-repo/rag_aget_infra_api.git app
+# Check service status
+sudo systemctl status rag-agent
 
-# Install deps
-cd app
-pip3.11 install -r requirements.txt
+# View service logs
+sudo journalctl -u rag-agent -f
 
-# Create .env (copy from output or create manually)
-nano .env
-
-# Start service
-sudo systemctl start rag-agent
-sudo systemctl enable rag-agent
-
-# Check it's running
+# Test health endpoint
 curl http://localhost:8000/health
 ```
 
 ## Useful Commands
 
 ```bash
-# View logs
-sudo journalctl -u rag-agent -f
-
 # Restart service
 sudo systemctl restart rag-agent
 
 # Check Redis
-redis6-cli ping
+redis-cli ping
+
+# Update code
+cd ~/rag-agent-infra-api
+git pull
+source venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart rag-agent
 
 # Backup ChromaDB to S3
 aws s3 sync /opt/rag-agent/data/chromadb s3://YOUR_BUCKET/backups/chromadb/
-
-# Restore from S3
-aws s3 sync s3://YOUR_BUCKET/backups/chromadb/ /opt/rag-agent/data/chromadb/
 ```
 
 ## Destroy

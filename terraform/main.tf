@@ -1,5 +1,7 @@
 # =============================================================================
-# RAG Agent Infrastructure - Simple EC2 + S3 Deployment
+# RAG Agent Infrastructure - Fully Automated EC2 + S3 Deployment
+# =============================================================================
+# Run this from an EC2 with admin IAM role - no credentials needed
 # =============================================================================
 
 terraform {
@@ -22,39 +24,59 @@ provider "aws" {
 # =============================================================================
 
 variable "aws_region" {
-  default = "us-east-1"
+  description = "AWS region to deploy into"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "project_name" {
-  default = "rag-agent"
+  description = "Project name for resource naming"
+  type        = string
+  default     = "rag-agent"
 }
 
 variable "instance_type" {
-  default = "t3.medium"  # 2 vCPU, 4GB RAM - good for ChromaDB
+  description = "EC2 instance type"
+  type        = string
+  default     = "t3.medium"  # 2 vCPU, 4GB RAM - good for ChromaDB
 }
 
 variable "key_name" {
-  description = "SSH key pair name"
+  description = "SSH key pair name (optional - leave empty for SSM-only access)"
   type        = string
+  default     = ""
 }
 
 variable "allowed_ssh_cidr" {
   description = "CIDR block allowed to SSH (your IP)"
+  type        = string
   default     = "0.0.0.0/0"  # Restrict this to your IP!
+}
+
+variable "github_repo_url" {
+  description = "GitHub repository URL for the RAG Agent API"
+  type        = string
+  default     = "https://github.com/guybass/rag-agent-infra-api.git"
+}
+
+variable "github_branch" {
+  description = "Git branch to deploy"
+  type        = string
+  default     = "main"
 }
 
 # =============================================================================
 # Data Sources
 # =============================================================================
 
-# Latest Amazon Linux 2023 AMI
-data "aws_ami" "amazon_linux" {
+# Latest Ubuntu 24.04 LTS AMI
+data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["099720109477"]  # Canonical
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
 
   filter {
@@ -116,12 +138,15 @@ resource "aws_security_group" "app" {
   description = "Security group for RAG Agent API"
   vpc_id      = data.aws_vpc.default.id
 
-  # SSH
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_ssh_cidr]
+  # SSH (only if key_name provided)
+  dynamic "ingress" {
+    for_each = var.key_name != "" ? [1] : []
+    content {
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [var.allowed_ssh_cidr]
+    }
   }
 
   # API
@@ -132,7 +157,7 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # HTTP (optional - for nginx reverse proxy)
+  # HTTP (for nginx reverse proxy)
   ingress {
     from_port   = 80
     to_port     = 80
@@ -140,20 +165,12 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # HTTPS (optional)
+  # HTTPS
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Redis (internal only - localhost)
-  ingress {
-    from_port   = 6379
-    to_port     = 6379
-    protocol    = "tcp"
-    self        = true
   }
 
   egress {
@@ -269,14 +286,20 @@ resource "aws_iam_role_policy" "aws_read" {
   })
 }
 
+# SSM Access (for Session Manager)
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.ec2.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 # =============================================================================
-# EC2 Instance
+# EC2 Instance - Fully Automated Deployment
 # =============================================================================
 
 resource "aws_instance" "app" {
-  ami                    = data.aws_ami.amazon_linux.id
+  ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
-  key_name               = var.key_name
+  key_name               = var.key_name != "" ? var.key_name : null
   vpc_security_group_ids = [aws_security_group.app.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2.name
   subnet_id              = data.aws_subnets.default.ids[0]
@@ -290,56 +313,79 @@ resource "aws_instance" "app" {
   user_data = <<-EOF
     #!/bin/bash
     set -e
+    exec > >(tee /var/log/user-data.log) 2>&1
+    echo "=== Starting RAG Agent Setup ==="
 
     # Update system
-    dnf update -y
+    apt-get update -y
+    apt-get upgrade -y
 
     # Install dependencies
-    dnf install -y docker git python3.11 python3.11-pip redis6
-
-    # Start Docker
-    systemctl start docker
-    systemctl enable docker
-    usermod -aG docker ec2-user
+    apt-get install -y python3 python3-pip python3-venv redis-server git curl jq
 
     # Start Redis
-    systemctl start redis6
-    systemctl enable redis6
-
-    # Create app directory
-    mkdir -p /opt/rag-agent
-    chown ec2-user:ec2-user /opt/rag-agent
+    systemctl start redis-server
+    systemctl enable redis-server
 
     # Create data directories
     mkdir -p /opt/rag-agent/data/chromadb
     mkdir -p /opt/rag-agent/data/terraform
-    chown -R ec2-user:ec2-user /opt/rag-agent/data
+
+    # Clone repository
+    cd /home/ubuntu
+    git clone -b ${var.github_branch} ${var.github_repo_url} rag-agent-infra-api
+    chown -R ubuntu:ubuntu rag-agent-infra-api /opt/rag-agent
+
+    # Setup Python virtual environment
+    cd /home/ubuntu/rag-agent-infra-api
+    sudo -u ubuntu python3 -m venv venv
+    sudo -u ubuntu bash -c "source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"
+
+    # Create .env file
+    cat > /home/ubuntu/rag-agent-infra-api/.env << 'ENVEOF'
+    APP_NAME=RAG Agent Infrastructure API
+    DEBUG=false
+    HOST=0.0.0.0
+    PORT=8000
+    AWS_REGION=${var.aws_region}
+    REDIS_URL=redis://localhost:6379/0
+    CHROMA_PERSIST_DIRECTORY=/opt/rag-agent/data/chromadb
+    TERRAFORM_STORAGE_PATH=/opt/rag-agent/data/terraform
+    LLM_PROVIDER=bedrock
+    BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+    ENVEOF
+    chown ubuntu:ubuntu /home/ubuntu/rag-agent-infra-api/.env
 
     # Create systemd service
-    cat > /etc/systemd/system/rag-agent.service << 'SERVICEEOF'
+    cat > /etc/systemd/system/rag-agent.service << 'SVCEOF'
     [Unit]
     Description=RAG Agent Infrastructure API
-    After=network.target redis6.service
+    After=network.target redis-server.service
+    Requires=redis-server.service
 
     [Service]
     Type=simple
-    User=ec2-user
-    WorkingDirectory=/opt/rag-agent/app
-    ExecStart=/usr/bin/python3.11 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    User=ubuntu
+    Group=ubuntu
+    WorkingDirectory=/home/ubuntu/rag-agent-infra-api
+    Environment="PATH=/home/ubuntu/rag-agent-infra-api/venv/bin:/usr/local/bin:/usr/bin:/bin"
+    EnvironmentFile=/home/ubuntu/rag-agent-infra-api/.env
+    ExecStart=/home/ubuntu/rag-agent-infra-api/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
     Restart=always
     RestartSec=5
-    Environment=CHROMA_PERSIST_DIRECTORY=/opt/rag-agent/data/chromadb
-    Environment=TERRAFORM_STORAGE_PATH=/opt/rag-agent/data/terraform
-    Environment=REDIS_URL=redis://localhost:6379/0
-    Environment=AWS_REGION=${var.aws_region}
 
     [Install]
     WantedBy=multi-user.target
-    SERVICEEOF
+    SVCEOF
 
+    # Start service
     systemctl daemon-reload
+    systemctl enable rag-agent
+    systemctl start rag-agent
 
-    echo "Setup complete! Clone your repo to /opt/rag-agent/app and start the service."
+    echo "=== RAG Agent Setup Complete ==="
+    echo "Service status:"
+    systemctl status rag-agent --no-pager || true
   EOF
 
   tags = {
@@ -348,7 +394,7 @@ resource "aws_instance" "app" {
 }
 
 # =============================================================================
-# Elastic IP (optional - for stable IP)
+# Elastic IP (for stable IP)
 # =============================================================================
 
 resource "aws_eip" "app" {
@@ -365,60 +411,55 @@ resource "aws_eip" "app" {
 # =============================================================================
 
 output "instance_id" {
-  value = aws_instance.app.id
+  description = "EC2 Instance ID"
+  value       = aws_instance.app.id
 }
 
 output "public_ip" {
-  value = aws_eip.app.public_ip
+  description = "Public IP address"
+  value       = aws_eip.app.public_ip
 }
 
 output "api_url" {
-  value = "http://${aws_eip.app.public_ip}:8000"
+  description = "API base URL"
+  value       = "http://${aws_eip.app.public_ip}:8000"
 }
 
-output "ssh_command" {
-  value = "ssh -i ~/.ssh/${var.key_name}.pem ec2-user@${aws_eip.app.public_ip}"
+output "health_check_url" {
+  description = "Health check endpoint"
+  value       = "http://${aws_eip.app.public_ip}:8000/health"
+}
+
+output "api_docs_url" {
+  description = "API documentation (Swagger)"
+  value       = "http://${aws_eip.app.public_ip}:8000/docs"
 }
 
 output "s3_bucket" {
-  value = aws_s3_bucket.data.id
+  description = "S3 bucket for data storage"
+  value       = aws_s3_bucket.data.id
 }
 
-output "setup_commands" {
-  value = <<-EOT
+output "ssm_connect" {
+  description = "Connect via SSM Session Manager"
+  value       = "aws ssm start-session --target ${aws_instance.app.id}"
+}
 
-    # 1. SSH into the instance
-    ssh -i ~/.ssh/${var.key_name}.pem ec2-user@${aws_eip.app.public_ip}
+output "ssh_command" {
+  description = "SSH command (if key_name was provided)"
+  value       = var.key_name != "" ? "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_eip.app.public_ip}" : "SSH disabled - use SSM Session Manager"
+}
 
-    # 2. Clone your repo
-    cd /opt/rag-agent
-    git clone <your-repo-url> app
+output "view_logs" {
+  description = "Commands to view logs on the instance"
+  value       = <<-EOT
+    # View user-data setup log:
+    cat /var/log/user-data.log
 
-    # 3. Install dependencies
-    cd app
-    pip3.11 install -r requirements.txt
-
-    # 4. Create .env file
-    cat > .env << 'ENV'
-    APP_NAME=RAG Agent Infrastructure API
-    DEBUG=false
-    HOST=0.0.0.0
-    PORT=8000
-    AWS_REGION=${var.aws_region}
-    REDIS_URL=redis://localhost:6379/0
-    CHROMA_PERSIST_DIRECTORY=/opt/rag-agent/data/chromadb
-    TERRAFORM_STORAGE_PATH=/opt/rag-agent/data/terraform
-    ENV
-
-    # 5. Start the service
-    sudo systemctl start rag-agent
-    sudo systemctl enable rag-agent
-
-    # 6. Check status
-    sudo systemctl status rag-agent
-
-    # 7. View logs
+    # View service logs:
     sudo journalctl -u rag-agent -f
 
+    # Check service status:
+    sudo systemctl status rag-agent
   EOT
 }

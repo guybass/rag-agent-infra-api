@@ -9,9 +9,16 @@ project_name = "rag-agent"
 # t3.large  = 2 vCPU, 8GB RAM (~$60/month) - better for large ChromaDB
 instance_type = "t3.medium"
 
-# Your SSH key pair name (must exist in AWS)
-key_name = "your-key-name"
+# SSH key pair name (optional - leave empty for SSM-only access)
+# If empty, you can still connect via: aws ssm start-session --target <instance-id>
+key_name = ""
 
-# Restrict SSH access to your IP (recommended!)
+# Restrict SSH access to your IP (only used if key_name is set)
 # Find your IP: curl ifconfig.me
-allowed_ssh_cidr = "YOUR_IP/32"  # e.g., "203.0.113.50/32"
+allowed_ssh_cidr = "0.0.0.0/0"  # e.g., "203.0.113.50/32"
+
+# GitHub repository URL
+github_repo_url = "https://github.com/guybass/rag-agent-infra-api.git"
+
+# Git branch to deploy
+github_branch = "main"
