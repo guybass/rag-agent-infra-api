@@ -11,6 +11,32 @@ from fastapi import FastAPI
 from app.main import app
 
 
+def get_field_info(model_class):
+    """Extract field info from Pydantic model (V2 compatible)."""
+    fields = {}
+    if hasattr(model_class, 'model_fields'):
+        # Pydantic V2
+        for fname, field in model_class.model_fields.items():
+            required = field.is_required()
+            ftype = str(field.annotation).replace('typing.', '')
+            fields[fname] = {
+                'type': ftype,
+                'required': required,
+                'default': field.default if field.default is not None else None
+            }
+    elif hasattr(model_class, '__fields__'):
+        # Pydantic V1 fallback
+        for fname, field in model_class.__fields__.items():
+            required = field.required if hasattr(field, 'required') else True
+            ftype = str(getattr(field, 'outer_type_', field.annotation)).replace('typing.', '')
+            fields[fname] = {
+                'type': ftype,
+                'required': required,
+                'default': field.default if field.default is not None else None
+            }
+    return fields
+
+
 def get_endpoint_info(app: FastAPI):
     """Extract endpoint information from FastAPI app."""
     endpoints = []
@@ -29,26 +55,19 @@ def get_endpoint_info(app: FastAPI):
                     # Try to get request body model
                     if hasattr(route, 'dependant') and route.dependant.body_params:
                         for param in route.dependant.body_params:
-                            if hasattr(param, 'type_') and hasattr(param.type_, '__fields__'):
-                                fields = {}
-                                for fname, field in param.type_.__fields__.items():
-                                    required = field.required if hasattr(field, 'required') else True
-                                    ftype = str(field.outer_type_).replace('typing.', '')
-                                    fields[fname] = {
-                                        'type': ftype,
-                                        'required': required,
-                                        'default': field.default if field.default is not None else None
-                                    }
-                                endpoint['body_fields'] = fields
+                            if hasattr(param, 'type_'):
+                                fields = get_field_info(param.type_)
+                                if fields:
+                                    endpoint['body_fields'] = fields
 
                     # Get query params
                     if hasattr(route, 'dependant') and route.dependant.query_params:
                         query_fields = {}
                         for param in route.dependant.query_params:
                             query_fields[param.name] = {
-                                'type': str(param.type_),
-                                'required': param.required,
-                                'default': param.default
+                                'type': str(getattr(param, 'type_', 'any')),
+                                'required': getattr(param, 'required', False),
+                                'default': getattr(param, 'default', None)
                             }
                         endpoint['query_params'] = query_fields
 
