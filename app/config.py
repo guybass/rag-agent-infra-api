@@ -76,3 +76,8 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def clear_settings_cache():
+    """Clear the settings cache to reload from .env."""
+    get_settings.cache_clear()

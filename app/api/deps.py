@@ -6,8 +6,6 @@ from datetime import datetime, timedelta
 from app.config import get_settings
 from app.services.vector_store import VectorStoreService
 
-settings = get_settings()
-
 # API Key authentication
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -22,6 +20,8 @@ def get_vector_store(request: Request) -> VectorStoreService:
 
 async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
     """Verify API key authentication."""
+    settings = get_settings()
+
     if not api_key:
         raise HTTPException(
             status_code=401,
@@ -42,6 +42,8 @@ async def verify_token(
     credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
 ) -> dict:
     """Verify JWT token authentication."""
+    settings = get_settings()
+
     if not credentials:
         raise HTTPException(
             status_code=401,
@@ -68,6 +70,8 @@ async def verify_api_key_or_token(
     credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
 ) -> dict:
     """Verify either API key or JWT token authentication."""
+    settings = get_settings()
+
     # If auth is disabled, allow all requests (for testing/private environments)
     if settings.auth_disabled:
         return {"auth_type": "none", "auth_disabled": True}
@@ -99,6 +103,7 @@ async def verify_api_key_or_token(
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
+    settings = get_settings()
     to_encode = data.copy()
 
     if expires_delta:
