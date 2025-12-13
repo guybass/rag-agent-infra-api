@@ -1,6 +1,14 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import List
+from enum import Enum
+
+
+class LLMProviderType(str, Enum):
+    """LLM Provider types for configuration."""
+    BEDROCK = "bedrock"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
 
 
 class Settings(BaseSettings):
@@ -17,6 +25,11 @@ class Settings(BaseSettings):
     secret_key: str = "your-secret-key-change-in-production"
     api_key: str = "your-api-key-change-in-production"
     access_token_expire_minutes: int = 30
+
+    # LLM Provider Configuration
+    llm_provider: LLMProviderType = LLMProviderType.BEDROCK
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
 
     # AWS Bedrock / General AWS
     aws_region: str = "us-east-1"
