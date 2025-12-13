@@ -79,21 +79,9 @@ else
     echo "   ✓ Virtual environment created and dependencies installed"
 fi
 
-# Test Python imports
+# Create .env file FIRST (before any Python imports that cache settings)
 echo ""
-echo "[5/8] Testing Python imports..."
-source "${VENV_DIR}/bin/activate"
-if python3 -c "from app.config import get_settings; print('   ✓ Config OK')" 2>&1; then
-    :
-else
-    echo "   ✗ Config import failed!"
-    python3 -c "from app.config import get_settings" 2>&1
-    exit 1
-fi
-
-# Create .env file
-echo ""
-echo "[6/8] Creating .env file..."
+echo "[5/8] Creating .env file..."
 cat > "$ENV_FILE" << 'EOF'
 # ===========================================
 # RAG Agent Infrastructure API Configuration
@@ -130,6 +118,18 @@ EOF
 chown ubuntu:ubuntu "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 echo "   ✓ Created: $ENV_FILE"
+
+# Test Python imports (AFTER .env is created so settings are correct)
+echo ""
+echo "[6/8] Testing Python imports..."
+source "${VENV_DIR}/bin/activate"
+if python3 -c "from app.config import get_settings; s = get_settings(); print(f'   ✓ Config OK (AUTH_DISABLED={s.auth_disabled})')" 2>&1; then
+    :
+else
+    echo "   ✗ Config import failed!"
+    python3 -c "from app.config import get_settings" 2>&1
+    exit 1
+fi
 
 # Test full app import (this will catch startup errors)
 echo ""
