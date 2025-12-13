@@ -1,7 +1,7 @@
 import os
 import uuid
 from typing import BinaryIO
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 
