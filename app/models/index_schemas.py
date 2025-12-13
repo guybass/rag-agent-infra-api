@@ -54,7 +54,7 @@ class TerraformEnvironment(str, Enum):
 
 class TerraformHierarchy(BaseModel):
     """Hierarchical identifier for terraform resources."""
-    user_id: str
+    user_id: Optional[str] = None
     account_id: Optional[str] = None
     project_id: Optional[str] = None
     environment: Optional[str] = None
@@ -394,7 +394,7 @@ class MemorySearchResponse(BaseModel):
 # Decision Requests
 class DecisionStoreRequest(BaseModel):
     """Request to store a decision."""
-    session_id: str
+    session_id: Optional[str] = None
     decision_type: str
     context: str
     reasoning: str
