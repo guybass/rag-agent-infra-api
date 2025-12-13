@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, BinaryIO, Tuple
 from pathlib import Path
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.services.multi_vector_store import MultiVectorStoreService
 from app.services.terraform.terraform_parser import TerraformParser
