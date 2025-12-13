@@ -187,8 +187,8 @@ class MemoryEntry(BaseModel):
 class AgentDecision(BaseModel):
     """Agent decision record."""
     decision_id: str
-    user_id: str
-    session_id: str
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
     decision_type: str
     context: str
     reasoning: str
