@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     secret_key: str = "your-secret-key-change-in-production"
     api_key: str = "your-api-key-change-in-production"
     access_token_expire_minutes: int = 30
+    auth_disabled: bool = False  # Set to True to disable API key/JWT auth (for testing)
 
     # LLM Provider Configuration
     llm_provider: LLMProviderType = LLMProviderType.BEDROCK
@@ -35,7 +36,8 @@ class Settings(BaseSettings):
     aws_region: str = "us-east-1"
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
-    bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+    aws_assume_role_arn: str | None = None  # Role ARN to assume (e.g., arn:aws:iam::123456789012:role/EC2-Admin-Role)
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     # AWS Live Fetch
     aws_live_fetch_enabled: bool = True

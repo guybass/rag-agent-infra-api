@@ -68,6 +68,10 @@ async def verify_api_key_or_token(
     credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
 ) -> dict:
     """Verify either API key or JWT token authentication."""
+    # If auth is disabled, allow all requests (for testing/private environments)
+    if settings.auth_disabled:
+        return {"auth_type": "none", "auth_disabled": True}
+
     # Try API key first
     if api_key:
         if api_key == settings.api_key:

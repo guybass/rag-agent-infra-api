@@ -19,12 +19,33 @@ class BedrockProvider(BaseLLMProvider):
             retries={"max_attempts": 3, "mode": "adaptive"},
         )
 
-        client_kwargs = {"config": config}
-        if settings.aws_access_key_id and settings.aws_secret_access_key:
-            client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
-            client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
-
-        self.client = boto3.client("bedrock-runtime", **client_kwargs)
+        # Check if we need to assume a role
+        if settings.aws_assume_role_arn:
+            # Use STS to assume the specified role
+            sts_client = boto3.client("sts", region_name=settings.aws_region)
+            assumed_role = sts_client.assume_role(
+                RoleArn=settings.aws_assume_role_arn,
+                RoleSessionName="rag-agent-bedrock-session"
+            )
+            credentials = assumed_role["Credentials"]
+            self.client = boto3.client(
+                "bedrock-runtime",
+                config=config,
+                aws_access_key_id=credentials["AccessKeyId"],
+                aws_secret_access_key=credentials["SecretAccessKey"],
+                aws_session_token=credentials["SessionToken"],
+            )
+        elif settings.aws_access_key_id and settings.aws_secret_access_key:
+            # Use explicit credentials from config
+            self.client = boto3.client(
+                "bedrock-runtime",
+                config=config,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+            )
+        else:
+            # Use EC2 instance role / default credential chain
+            self.client = boto3.client("bedrock-runtime", config=config)
 
     @property
     def default_model_id(self) -> str:

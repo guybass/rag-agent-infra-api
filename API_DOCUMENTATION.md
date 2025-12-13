@@ -3,6 +3,7 @@
 ## Multi-Index Semantic Layer for DevOps/SRE/Platform Engineers
 
 **Version:** 2.0.0
+**Base URL:** `http://localhost:8000`
 
 This API provides a comprehensive semantic layer for AI agents working with AWS infrastructure and Terraform. It supports hierarchical storage, semantic search, and real-time context retrieval across multiple index groups.
 
@@ -10,83 +11,74 @@ This API provides a comprehensive semantic layer for AI agents working with AWS 
 
 ## Table of Contents
 
-1. [Architecture Overview](#architecture-overview)
-2. [Authentication](#authentication)
-3. [Core Endpoints](#core-endpoints)
-4. [Sessions API](#sessions-api)
-5. [Memory API](#memory-api)
-6. [Decisions API](#decisions-api)
-7. [Terraform Files API](#terraform-files-api)
-8. [Terraform Search API](#terraform-search-api)
-9. [Context State API](#context-state-api)
-10. [Context Live API](#context-live-api)
-11. [Context General API](#context-general-api)
-12. [Unified Search API](#unified-search-api)
-
----
-
-## Architecture Overview
-
-### Index Groups
-
-```
-ChromaDB Client
-├── TERRAFORM (Semantic + File System)
-│   └── terraform__{user}__{account}__{project}
-│       ├── Metadata: environment, category, resource_kind, resource_types
-│       └── File System: /terraform_data/{user}/{account}/{project}/{env}/...
-│
-├── SESSIONS (Redis - Ephemeral)
-│   └── session:{user}:{session_id}
-│       ├── messages, context, state, decisions
-│       └── TTL-based expiration
-│
-├── MEMORY (ChromaDB - Persistent)
-│   ├── memory__session__{user}    (session-specific)
-│   ├── memory__longterm__{user}   (cross-session)
-│   └── memory__decisions__{user}  (agent decisions - INDEXED!)
-│
-└── CONTEXT (ChromaDB + AWS Live)
-    ├── context__state__{user}__{account}  (terraform.tfstate)
-    ├── context__live__{user}__{account}   (live AWS API)
-    └── context__general__{user}           (general context)
-```
-
-### Collection Naming Convention
-
-All ChromaDB collections follow the pattern:
-```
-{index_group}__{subindex}__{user_id}__{account_id}__{project_id}
-```
+1. [Authentication](#authentication)
+2. [Health Check](#health-check)
+3. [Sessions API](#sessions-api)
+4. [Memory API](#memory-api)
+5. [Decisions API](#decisions-api)
+6. [Terraform Files API](#terraform-files-api)
+7. [Terraform Search API](#terraform-search-api)
+8. [Context State API](#context-state-api)
+9. [Context Live API](#context-live-api)
+10. [Context General API](#context-general-api)
+11. [Unified Search API](#unified-search-api)
+12. [Documents API](#documents-api)
+13. [Chat API](#chat-api)
+14. [Error Responses](#error-responses)
 
 ---
 
 ## Authentication
 
-All endpoints require authentication via API key or JWT token.
+All protected endpoints require authentication via one of these methods:
 
-**Header:** `Authorization: Bearer <token>` or `X-API-Key: <api_key>`
+### API Key (Recommended)
+```bash
+curl -X GET "http://localhost:8000/api/v1/sessions/" \
+  -H "X-API-Key: your-api-key"
+```
 
-The authenticated user's ID is extracted from the token and used for data isolation.
+### JWT Bearer Token
+```bash
+curl -X GET "http://localhost:8000/api/v1/sessions/" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
 
 ---
 
-## Core Endpoints
+## Health Check
 
-### Health Check
+### GET /health
+Check if the service is running.
 
-#### `GET /health`
+**Authentication:** None required
 
-**Description:** Basic health check for the API.
-
-**Internal Logic:**
-1. Returns immediate success response
-2. No database or service checks
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/health"
+```
 
 **Response:**
 ```json
 {
   "status": "healthy"
+}
+```
+
+### GET /
+Get service information.
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/"
+```
+
+**Response:**
+```json
+{
+  "message": "RAG Agent Infrastructure API",
+  "version": "1.0.0",
+  "docs": "/docs"
 }
 ```
 
@@ -99,47 +91,42 @@ Base Path: `/api/v1/sessions`
 Sessions are ephemeral conversation contexts stored in Redis with automatic TTL expiration.
 
 ### Create Session
+**POST** `/api/v1/sessions/`
 
-#### `POST /`
+Create a new agent session.
 
-**Description:** Create a new session for an AI agent conversation.
-
-**Internal Logic:**
-1. Generate unique session ID using UUID4
-2. Create `SessionData` object with:
-   - `session_id`: Generated UUID
-   - `user_id`: From authentication
-   - `model_id`: LLM model identifier
-   - `provider`: LLM provider (bedrock, openai, anthropic)
-   - `created_at`: Current timestamp
-   - `ttl_seconds`: Session lifetime (default 3600)
-3. Serialize session to JSON
-4. Store in Redis with key pattern: `session:{user_id}:{session_id}`
-5. Set Redis TTL for automatic expiration
-
-**Request Body:**
-```json
-{
-  "model_id": "anthropic.claude-3-sonnet",
-  "provider": "bedrock",
-  "initial_context": {"project": "infrastructure"},
-  "ttl_seconds": 3600
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/sessions/" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "claude-3-sonnet",
+    "provider": "anthropic",
+    "initial_context": {
+      "user_name": "John",
+      "project": "infrastructure-migration"
+    },
+    "ttl_seconds": 7200
+  }'
 ```
 
 **Response:**
 ```json
 {
   "session": {
-    "session_id": "uuid",
-    "user_id": "user123",
-    "model_id": "anthropic.claude-3-sonnet",
-    "provider": "bedrock",
-    "created_at": "2024-01-15T10:30:00Z",
-    "messages": [],
-    "context": {"project": "infrastructure"},
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "model_id": "claude-3-sonnet",
+    "provider": "anthropic",
+    "context": {
+      "user_name": "John",
+      "project": "infrastructure-migration"
+    },
     "state": {},
-    "ttl_seconds": 3600
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z",
+    "expires_at": "2024-01-15T12:30:00Z",
+    "is_active": true
   }
 }
 ```
@@ -147,33 +134,38 @@ Sessions are ephemeral conversation contexts stored in Redis with automatic TTL 
 ---
 
 ### List Sessions
+**GET** `/api/v1/sessions/`
 
-#### `GET /`
-
-**Description:** List all active sessions for the authenticated user.
-
-**Internal Logic:**
-1. Scan Redis for keys matching pattern: `session:{user_id}:*`
-2. For each key, retrieve session data
-3. Calculate remaining TTL using Redis TTL command
-4. Build summary objects with message counts
-5. Sort by last activity (most recent first)
+List all sessions with optional filters.
 
 **Query Parameters:**
-- `limit` (int, default=50): Maximum sessions to return
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model_id` | string | - | Filter by model |
+| `active_only` | boolean | true | Filter active sessions |
+
+**Example:**
+```bash
+# List all active sessions
+curl -X GET "http://localhost:8000/api/v1/sessions/" \
+  -H "X-API-Key: your-api-key"
+
+# Filter by model
+curl -X GET "http://localhost:8000/api/v1/sessions/?model_id=claude-3-sonnet&active_only=true" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
   "sessions": [
     {
-      "session_id": "uuid",
-      "model_id": "anthropic.claude-3-sonnet",
-      "provider": "bedrock",
+      "session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "model_id": "claude-3-sonnet",
+      "provider": "anthropic",
       "created_at": "2024-01-15T10:30:00Z",
-      "last_activity": "2024-01-15T11:00:00Z",
-      "message_count": 15,
-      "ttl_remaining": 1800
+      "is_active": true,
+      "message_count": 5
     }
   ],
   "total": 1
@@ -183,29 +175,34 @@ Sessions are ephemeral conversation contexts stored in Redis with automatic TTL 
 ---
 
 ### Get Session
+**GET** `/api/v1/sessions/{session_id}`
 
-#### `GET /{session_id}`
+Get details of a specific session.
 
-**Description:** Retrieve a specific session with all messages.
-
-**Internal Logic:**
-1. Build Redis key: `session:{user_id}:{session_id}`
-2. Fetch session JSON from Redis
-3. Deserialize to `SessionData` object
-4. Return 404 if not found
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
   "session": {
-    "session_id": "uuid",
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
     "user_id": "user123",
-    "model_id": "anthropic.claude-3-sonnet",
+    "model_id": "claude-3-sonnet",
+    "provider": "anthropic",
     "messages": [
       {
         "role": "user",
-        "content": "Deploy EKS cluster",
-        "timestamp": "2024-01-15T10:31:00Z"
+        "content": "How do I create an EKS cluster?",
+        "timestamp": "2024-01-15T10:35:00Z"
+      },
+      {
+        "role": "assistant",
+        "content": "To create an EKS cluster...",
+        "timestamp": "2024-01-15T10:35:05Z"
       }
     ],
     "context": {},
@@ -217,164 +214,175 @@ Sessions are ephemeral conversation contexts stored in Redis with automatic TTL 
 ---
 
 ### Delete Session
+**DELETE** `/api/v1/sessions/{session_id}`
 
-#### `DELETE /{session_id}`
+Delete a session.
 
-**Description:** Delete a session and all its data.
-
-**Internal Logic:**
-1. Build Redis key: `session:{user_id}:{session_id}`
-2. Delete key from Redis
-3. Return success even if key didn't exist
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
-  "deleted": true,
-  "session_id": "uuid"
+  "message": "Session deleted",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
 ---
 
 ### Add Message
+**POST** `/api/v1/sessions/{session_id}/messages`
 
-#### `POST /{session_id}/messages`
+Add a message to the session history.
 
-**Description:** Add a message to the session conversation.
-
-**Internal Logic:**
-1. Retrieve existing session from Redis
-2. Create `SessionMessage` with:
-   - `role`: user/assistant/system
-   - `content`: Message text
-   - `timestamp`: Current time
-   - `metadata`: Optional additional data
-3. Append message to session's messages array
-4. Update `last_activity` timestamp
-5. Save updated session back to Redis
-6. Reset TTL to extend session lifetime
-
-**Request Body:**
-```json
-{
-  "role": "user",
-  "content": "What EC2 instances are running?",
-  "metadata": {"intent": "query"}
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/messages" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "user",
+    "content": "How do I create an EKS cluster?",
+    "metadata": {
+      "timestamp": "2024-01-15T10:35:00Z"
+    }
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "session": { ... },
-  "message_added": true
+  "message": "Message added",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
 ---
 
 ### Get Messages
+**GET** `/api/v1/sessions/{session_id}/messages`
 
-#### `GET /{session_id}/messages`
-
-**Description:** Retrieve messages from a session with pagination.
-
-**Internal Logic:**
-1. Retrieve session from Redis
-2. Apply limit and offset to messages array
-3. Return paginated messages with total count
+Retrieve messages from a session.
 
 **Query Parameters:**
-- `limit` (int, default=50): Messages per page
-- `offset` (int, default=0): Starting position
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 50 | Messages per page (1-500) |
+| `offset` | int | 0 | Starting position |
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/messages?limit=20&offset=0" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
-  "messages": [...],
-  "total": 100,
-  "limit": 50,
-  "offset": 0
+  "messages": [
+    {
+      "role": "user",
+      "content": "How do I create an EKS cluster?",
+      "metadata": {},
+      "timestamp": "2024-01-15T10:35:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "To create an EKS cluster...",
+      "metadata": {},
+      "timestamp": "2024-01-15T10:35:05Z"
+    }
+  ],
+  "total": 2,
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
 ---
 
 ### Update Context
+**PUT** `/api/v1/sessions/{session_id}/context`
 
-#### `PUT /{session_id}/context`
+Update session context.
 
-**Description:** Update the session's context object.
+**Example:**
+```bash
+curl -X PUT "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/context" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "context": {
+      "current_task": "eks-setup",
+      "aws_region": "us-west-2"
+    },
+    "merge": true
+  }'
+```
 
-**Internal Logic:**
-1. Retrieve session from Redis
-2. If `merge=true`: Deep merge new context with existing
-3. If `merge=false`: Replace context entirely
-4. Save updated session
-5. Update last_activity timestamp
-
-**Request Body:**
+**Response:**
 ```json
 {
-  "context": {
-    "current_task": "deploying_eks",
-    "environment": "production"
-  },
-  "merge": true
+  "message": "Context updated",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
 ---
 
 ### Update State
+**PUT** `/api/v1/sessions/{session_id}/state`
 
-#### `PUT /{session_id}/state`
+Update session state.
 
-**Description:** Update the session's state object (for agent state machine).
-
-**Internal Logic:**
-1. Retrieve session from Redis
-2. Merge or replace state based on `merge` parameter
-3. Save and update timestamps
-
-**Request Body:**
-```json
-{
-  "state": {
-    "step": 3,
-    "status": "awaiting_approval"
-  },
-  "merge": true
-}
-```
-
----
-
-### Extend TTL
-
-#### `POST /{session_id}/extend`
-
-**Description:** Extend the session's time-to-live.
-
-**Internal Logic:**
-1. Retrieve session from Redis
-2. Calculate new TTL: current_ttl + additional_seconds
-3. Cap at maximum (86400 seconds / 24 hours)
-4. Update Redis key's TTL using EXPIRE command
-
-**Request Body:**
-```json
-{
-  "additional_seconds": 3600
-}
+**Example:**
+```bash
+curl -X PUT "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/state" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "state": {
+      "step": 3,
+      "resources_created": ["vpc", "subnet"]
+    },
+    "merge": true
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "extended": true,
-  "new_ttl": 5400
+  "message": "State updated",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+---
+
+### Extend Session TTL
+**POST** `/api/v1/sessions/{session_id}/extend`
+
+Extend the session expiration time.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/extend" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "additional_seconds": 3600
+  }'
+```
+
+**Response:**
+```json
+{
+  "message": "Session extended",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "additional_seconds": 3600
 }
 ```
 
@@ -387,45 +395,41 @@ Base Path: `/api/v1/memory`
 Memory provides persistent storage for information that should survive session boundaries.
 
 ### Store Memory
+**POST** `/api/v1/memory/`
 
-#### `POST /`
+Store a new memory entry.
 
-**Description:** Store a memory entry for future retrieval.
-
-**Internal Logic:**
-1. Generate unique memory ID (UUID4)
-2. Determine collection based on memory_type:
-   - `SESSION`: `memory__session__{user_id}`
-   - `LONGTERM`: `memory__longterm__{user_id}`
-3. Create embedding of content using ChromaDB's embedding function
-4. Build metadata object with:
-   - `memory_id`, `user_id`, `session_id`
-   - `memory_type`, `importance_score`
-   - `tags` (stored as comma-separated string)
-   - `created_at`, `accessed_at`
-5. Add document to ChromaDB collection
-
-**Request Body:**
-```json
-{
-  "content": "User prefers Terraform modules over raw resources",
-  "memory_type": "longterm",
-  "session_id": "optional-session-id",
-  "importance_score": 0.8,
-  "metadata": {"category": "preference"},
-  "tags": ["terraform", "user-preference"]
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/memory/" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "User prefers Terraform modules for infrastructure provisioning over raw resources",
+    "memory_type": "longterm",
+    "importance_score": 0.85,
+    "metadata": {
+      "source": "conversation",
+      "topic": "infrastructure"
+    },
+    "tags": ["terraform", "preferences", "infrastructure"]
+  }'
 ```
 
 **Response:**
 ```json
 {
   "memory": {
-    "memory_id": "uuid",
-    "content": "...",
+    "memory_id": "mem_xyz789",
+    "content": "User prefers Terraform modules for infrastructure provisioning over raw resources",
     "memory_type": "longterm",
-    "importance_score": 0.8,
-    "created_at": "2024-01-15T10:30:00Z"
+    "importance_score": 0.85,
+    "metadata": {
+      "source": "conversation",
+      "topic": "infrastructure"
+    },
+    "tags": ["terraform", "preferences", "infrastructure"],
+    "created_at": "2024-01-15T10:40:00Z"
   }
 }
 ```
@@ -433,30 +437,22 @@ Memory provides persistent storage for information that should survive session b
 ---
 
 ### Search Memories
+**POST** `/api/v1/memory/search`
 
-#### `POST /search`
+Semantic search across memories.
 
-**Description:** Semantically search memories.
-
-**Internal Logic:**
-1. Determine collections to search based on `memory_types`
-2. For each collection:
-   - Query ChromaDB with semantic similarity search
-   - Apply metadata filters (session_id, min_importance, tags)
-3. Aggregate results from all collections
-4. Sort by relevance score (1 - distance)
-5. Return top_k results
-
-**Request Body:**
-```json
-{
-  "query": "user preferences for infrastructure",
-  "memory_types": ["session", "longterm"],
-  "session_id": "optional-filter",
-  "min_importance": 0.5,
-  "tags": ["terraform"],
-  "top_k": 10
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/memory/search" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What does the user prefer for infrastructure?",
+    "memory_types": ["longterm", "session"],
+    "min_importance": 0.5,
+    "tags": ["infrastructure"],
+    "top_k": 5
+  }'
 ```
 
 **Response:**
@@ -464,89 +460,132 @@ Memory provides persistent storage for information that should survive session b
 {
   "results": [
     {
-      "memory": { ... },
-      "relevance_score": 0.92
+      "memory_id": "mem_xyz789",
+      "content": "User prefers Terraform modules for infrastructure provisioning",
+      "memory_type": "longterm",
+      "importance_score": 0.85,
+      "relevance_score": 0.92,
+      "tags": ["terraform", "preferences"]
     }
   ],
-  "query": "user preferences for infrastructure"
+  "total": 1
 }
 ```
 
 ---
 
 ### Get Memory
+**GET** `/api/v1/memory/{memory_id}`
 
-#### `GET /{memory_id}`
+Get a specific memory by ID.
 
-**Description:** Retrieve a specific memory by ID.
-
-**Internal Logic:**
-1. Search all memory collections for matching `memory_id` in metadata
-2. Increment `access_count` on retrieval
-3. Update `accessed_at` timestamp
-4. Return memory or 404
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/memory/mem_xyz789?memory_type=longterm" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
 ### Delete Memory
+**DELETE** `/api/v1/memory/{memory_id}`
 
-#### `DELETE /{memory_id}`
+Delete a memory entry.
 
-**Description:** Delete a memory entry.
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/memory/mem_xyz789" \
+  -H "X-API-Key: your-api-key"
+```
 
-**Internal Logic:**
-1. Find memory across collections by ID
-2. Delete document from ChromaDB using ID
-3. Return success/failure
+**Response:**
+```json
+{
+  "message": "Memory deleted",
+  "memory_id": "mem_xyz789"
+}
+```
 
 ---
 
 ### Update Importance
+**PUT** `/api/v1/memory/{memory_id}/importance`
 
-#### `PUT /{memory_id}/importance`
+Update the importance score of a memory.
 
-**Description:** Update a memory's importance score.
+**Example:**
+```bash
+curl -X PUT "http://localhost:8000/api/v1/memory/mem_xyz789/importance" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "importance_score": 0.95
+  }'
+```
 
-**Internal Logic:**
-1. Find memory by ID
-2. Update `importance_score` in metadata
-3. Re-index document with updated metadata
-
-**Request Body:**
+**Response:**
 ```json
 {
-  "importance_score": 0.95
+  "message": "Importance updated",
+  "memory_id": "mem_xyz789",
+  "new_score": 0.95
 }
 ```
 
 ---
 
 ### Promote to Long-term
+**POST** `/api/v1/memory/{memory_id}/promote`
 
-#### `POST /{memory_id}/promote`
+Promote a session memory to long-term storage.
 
-**Description:** Promote a session memory to long-term storage.
-
-**Internal Logic:**
-1. Retrieve memory from session collection
-2. Delete from session collection
-3. Add to longterm collection with:
-   - Updated `memory_type`: "longterm"
-   - Preserved content and metadata
-   - New `promoted_at` timestamp
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/memory/mem_session123/promote" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
 ### Get Session Memories
+**GET** `/api/v1/memory/session/{session_id}`
 
-#### `GET /session/{session_id}`
+Get all memories for a specific session.
 
-**Description:** Get all memories for a specific session.
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/memory/session/550e8400-e29b-41d4-a716-446655440000?limit=50" \
+  -H "X-API-Key: your-api-key"
+```
 
-**Internal Logic:**
-1. Query session memory collection
-2. Filter by `session_id` in metadata
-3. Return all matching memories
+---
+
+### Cleanup Session Memories
+**DELETE** `/api/v1/memory/session/{session_id}/cleanup`
+
+Clean up session memories, optionally keeping important ones.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `keep_important` | boolean | true | Keep important memories |
+| `importance_threshold` | float | 0.7 | Threshold (0.0-1.0) |
+
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/memory/session/550e8400-e29b-41d4-a716-446655440000/cleanup?keep_important=true&importance_threshold=0.7" \
+  -H "X-API-Key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "message": "Session memories cleaned up",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "deleted_count": 15,
+  "kept_important": true
+}
+```
 
 ---
 
@@ -557,83 +596,90 @@ Base Path: `/api/v1/memory/decisions`
 Decisions track agent reasoning and outcomes for future learning.
 
 ### Store Decision
+**POST** `/api/v1/memory/decisions/`
 
-#### `POST /`
+Store an agent decision for future reference.
 
-**Description:** Store an agent decision with reasoning.
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/memory/decisions/" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "decision_type": "resource_selection",
+    "context": "User asked about creating a managed Kubernetes cluster",
+    "reasoning": "Chose EKS over self-managed K8s due to user preference for managed services and AWS ecosystem",
+    "outcome": "Recommended aws_eks_cluster resource",
+    "confidence_score": 0.9,
+    "related_resources": ["aws_eks_cluster", "aws_eks_node_group"],
+    "tags": ["kubernetes", "aws", "eks"]
+  }'
+```
 
-**Internal Logic:**
-1. Generate decision ID (UUID4)
-2. Create searchable content by combining:
-   - `decision_type`
-   - `context`
-   - `reasoning`
-   - `outcome`
-3. Store in `memory__decisions__{user_id}` collection
-4. Build metadata with:
-   - `decision_id`, `session_id`, `decision_type`
-   - `confidence_score`
-   - `related_resources` (JSON array)
-   - `tags`
-5. Index for semantic search on reasoning
-
-**Request Body:**
+**Response:**
 ```json
 {
-  "session_id": "uuid",
-  "decision_type": "resource_selection",
-  "context": "User asked for high-availability database",
-  "reasoning": "Selected RDS Multi-AZ because user mentioned HA requirements and budget allows",
-  "outcome": "Recommended aws_db_instance with multi_az=true",
-  "confidence_score": 0.85,
-  "related_resources": ["aws_db_instance", "aws_db_subnet_group"],
-  "tags": ["rds", "high-availability"]
+  "decision": {
+    "decision_id": "dec_qrs456",
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "decision_type": "resource_selection",
+    "context": "User asked about creating a managed Kubernetes cluster",
+    "reasoning": "Chose EKS over self-managed K8s due to user preference for managed services",
+    "outcome": "Recommended aws_eks_cluster resource",
+    "confidence_score": 0.9,
+    "related_resources": ["aws_eks_cluster", "aws_eks_node_group"],
+    "tags": ["kubernetes", "aws", "eks"],
+    "created_at": "2024-01-15T10:45:00Z"
+  }
 }
 ```
 
 ---
 
 ### Search Decisions
+**POST** `/api/v1/memory/decisions/search`
 
-#### `POST /search`
+Search past decisions semantically.
 
-**Description:** Search past decisions semantically.
-
-**Internal Logic:**
-1. Query decisions collection with semantic search
-2. Filter by `decision_type`, `session_id`, `min_confidence`
-3. Return ranked results by relevance
-
-**Request Body:**
-```json
-{
-  "query": "database high availability",
-  "decision_type": "resource_selection",
-  "min_confidence": 0.7,
-  "top_k": 5
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/memory/decisions/search" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "kubernetes cluster recommendations",
+    "decision_type": "resource_selection",
+    "min_confidence": 0.7,
+    "top_k": 5
+  }'
 ```
 
 ---
 
 ### Get Decision
+**GET** `/api/v1/memory/decisions/{decision_id}`
 
-#### `GET /{decision_id}`
+Get a specific decision by ID.
 
-**Description:** Retrieve a specific decision.
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/memory/decisions/dec_qrs456" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
-### Get Decisions by Resource
+### Get Decisions for Resource
+**GET** `/api/v1/memory/decisions/resource/{resource_id}`
 
-#### `GET /resource/{resource_type}`
+Get all decisions related to a specific resource.
 
-**Description:** Get decisions related to a specific resource type.
-
-**Internal Logic:**
-1. Query decisions collection
-2. Filter where `related_resources` contains `resource_type`
-3. Return matching decisions
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/memory/decisions/resource/aws_eks_cluster?limit=20" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
@@ -644,168 +690,181 @@ Base Path: `/api/v1/terraform/files`
 Manages Terraform files with both file system storage and semantic indexing.
 
 ### Upload Files
+**POST** `/api/v1/terraform/files/upload`
 
-#### `POST /upload`
+Upload Terraform files for indexing.
 
-**Description:** Upload and index Terraform files.
-
-**Internal Logic:**
-1. Receive multipart file upload
-2. Validate file extensions (.tf, .tfvars, .hcl)
-3. Create directory structure:
-   ```
-   {terraform_storage_path}/{user_id}/{account_id}/{project_id}/{environment}/
-   ```
-4. Save files to filesystem
-5. For each file:
-   - Parse HCL using python-hcl2 (with regex fallback)
-   - Extract: resources, variables, outputs, module calls, data sources
-   - Determine category from file path and resource types
-   - Map resources to AWS services
-6. Chunk file content using RecursiveCharacterTextSplitter:
-   - chunk_size: 1000
-   - chunk_overlap: 200
-7. Create embeddings and store in ChromaDB collection:
-   - Collection: `terraform__semantic__{user_id}__{account_id}__{project_id}`
-8. Index metadata:
-   - `file_path`, `file_type`, `environment`, `category`
-   - `resource_types`, `aws_services`, `is_module`
-
-**Request (multipart/form-data):**
-- `files`: Multiple .tf files
-- `account_id`: AWS account identifier
-- `project_id`: Project identifier
-- `environment`: dev/staging/prod/global
-- `base_path`: Optional subdirectory
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/terraform/files/upload" \
+  -H "X-API-Key: your-api-key" \
+  -F "files=@main.tf" \
+  -F "files=@variables.tf" \
+  -F "files=@outputs.tf" \
+  -F "account_id=123456789012" \
+  -F "project_id=my-infrastructure" \
+  -F "environment=production" \
+  -F "base_path=terraform/eks"
+```
 
 **Response:**
 ```json
 {
-  "files_processed": 5,
-  "chunks_created": 23,
+  "files_processed": 3,
+  "chunks_created": 15,
   "hierarchy": {
-    "user_id": "user123",
-    "account_id": "123456789",
-    "project_id": "eks-cluster",
-    "environment": "prod"
-  },
-  "errors": []
+    "account_id": "123456789012",
+    "project_id": "my-infrastructure",
+    "environment": "production",
+    "base_path": "terraform/eks"
+  }
 }
 ```
 
 ---
 
 ### Get File Tree
+**GET** `/api/v1/terraform/files/tree`
 
-#### `GET /tree`
-
-**Description:** Get directory tree structure for Terraform files.
-
-**Internal Logic:**
-1. Build base path from user_id and optional filters
-2. Walk filesystem directory recursively
-3. Build tree nodes with:
-   - `name`: File/directory name
-   - `path`: Relative path
-   - `type`: "file" or "directory"
-   - `children`: Nested nodes for directories
-4. Apply depth limit if specified
+Get hierarchical view of uploaded Terraform files.
 
 **Query Parameters:**
-- `account_id`: Filter by account
-- `project_id`: Filter by project
-- `environment`: Filter by environment
-- `depth`: Maximum tree depth (-1 for unlimited)
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `account_id` | string | - | Filter by account |
+| `project_id` | string | - | Filter by project |
+| `environment` | string | - | Filter by environment |
+| `depth` | int | -1 | Max tree depth (-1 unlimited) |
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/files/tree?account_id=123456789012&project_id=my-infrastructure&depth=3" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
-  "tree": {
-    "name": "root",
-    "type": "directory",
-    "path": "/",
-    "children": [
-      {
-        "name": "environments",
-        "type": "directory",
-        "children": [
-          {
-            "name": "prod",
-            "type": "directory",
-            "children": [
-              {"name": "main.tf", "type": "file", "path": "/environments/prod/main.tf"}
-            ]
-          }
-        ]
-      }
-    ]
-  }
+  "name": "terraform",
+  "type": "directory",
+  "children": [
+    {
+      "name": "eks",
+      "type": "directory",
+      "children": [
+        {"name": "main.tf", "type": "file"},
+        {"name": "variables.tf", "type": "file"},
+        {"name": "outputs.tf", "type": "file"}
+      ]
+    }
+  ]
 }
 ```
 
 ---
 
 ### Get File Content
+**GET** `/api/v1/terraform/files/content/{file_path}`
 
-#### `GET /{file_path:path}`
+Get the content of a specific Terraform file.
 
-**Description:** Retrieve content of a specific Terraform file.
-
-**Internal Logic:**
-1. Validate file_path is within user's directory
-2. Read file from filesystem
-3. Optionally parse and return structured data
-
-**Query Parameters:**
-- `account_id`: Required account context
-- `project_id`: Required project context
-- `parse`: Boolean, return parsed HCL structure
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/files/content/terraform/eks/main.tf?account_id=123456789012&project_id=my-infrastructure" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
-  "path": "/environments/prod/main.tf",
-  "content": "resource \"aws_eks_cluster\" ...",
-  "parsed": {
-    "resources": [...],
-    "variables": [...],
-    "outputs": [...]
-  }
+  "file_path": "terraform/eks/main.tf",
+  "content": "resource \"aws_eks_cluster\" \"main\" {\n  name = var.cluster_name\n  ...\n}",
+  "account_id": "123456789012",
+  "project_id": "my-infrastructure"
 }
 ```
 
 ---
 
 ### Delete File
+**DELETE** `/api/v1/terraform/files/content/{file_path}`
 
-#### `DELETE /{file_path:path}`
+Delete a specific Terraform file.
 
-**Description:** Delete a Terraform file.
-
-**Internal Logic:**
-1. Delete file from filesystem
-2. Remove associated chunks from ChromaDB
-3. Update parent directory if empty
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/terraform/files/content/terraform/eks/old-module.tf?account_id=123456789012&project_id=my-infrastructure" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
 ### List Accounts
+**GET** `/api/v1/terraform/files/accounts`
 
-#### `GET /accounts`
+List all accounts with uploaded files.
 
-**Description:** List all accounts with Terraform data.
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/files/accounts" \
+  -H "X-API-Key: your-api-key"
+```
 
-**Internal Logic:**
-1. List directories under user's terraform path
-2. Return account IDs with metadata
+**Response:**
+```json
+{
+  "accounts": ["123456789012", "987654321098"],
+  "total": 2
+}
+```
 
 ---
 
 ### List Projects
+**GET** `/api/v1/terraform/files/accounts/{account_id}/projects`
 
-#### `GET /accounts/{account_id}/projects`
+List projects for an account.
 
-**Description:** List projects within an account.
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/files/accounts/123456789012/projects" \
+  -H "X-API-Key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "account_id": "123456789012",
+  "projects": ["my-infrastructure", "data-platform"],
+  "total": 2
+}
+```
+
+---
+
+### Get Project Stats
+**GET** `/api/v1/terraform/files/stats`
+
+Get statistics for a project.
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/files/stats?account_id=123456789012&project_id=my-infrastructure" \
+  -H "X-API-Key: your-api-key"
+```
+
+---
+
+### Delete Project
+**DELETE** `/api/v1/terraform/files/project`
+
+Delete all files for a project.
+
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/terraform/files/project?account_id=123456789012&project_id=my-infrastructure" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
@@ -816,88 +875,83 @@ Base Path: `/api/v1/terraform`
 Semantic search across indexed Terraform configurations.
 
 ### Semantic Search
+**POST** `/api/v1/terraform/search`
 
-#### `POST /search`
+Perform semantic search across Terraform code.
 
-**Description:** Search Terraform files semantically.
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/terraform/search" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "EKS cluster with managed node groups",
+    "hierarchy": {
+      "account_id": "123456789012",
+      "project_id": "my-infrastructure"
+    },
+    "resource_types": ["aws_eks_cluster", "aws_eks_node_group"],
+    "include_file_content": true,
+    "top_k": 10
+  }'
+```
 
-**Internal Logic:**
-1. Build list of collections to search based on hierarchy filters
-2. For each collection:
-   - Perform semantic similarity search
-   - Apply metadata filters:
-     - `resource_types`: Filter by specific resources
-     - `categories`: Filter by category (networking, compute, etc.)
-     - `environments`: Filter by environment
-3. Aggregate and rank results by relevance
-4. Optionally include full file content
-
-**Request Body:**
+**Response:**
 ```json
-{
-  "query": "EKS cluster with managed node groups",
-  "hierarchy": {
-    "account_id": "123456789",
-    "project_id": "eks-cluster"
-  },
-  "resource_types": ["aws_eks_cluster", "aws_eks_node_group"],
-  "categories": ["compute"],
-  "environments": ["prod", "staging"],
-  "include_file_content": false,
-  "top_k": 10
-}
+[
+  {
+    "content": "resource \"aws_eks_cluster\" \"main\" {\n  name = var.cluster_name\n  role_arn = aws_iam_role.eks.arn\n  ...\n}",
+    "metadata": {
+      "file_path": "terraform/eks/main.tf",
+      "resource_type": "aws_eks_cluster",
+      "resource_name": "main"
+    },
+    "relevance_score": 0.94,
+    "chunk_id": "chunk_abc123"
+  }
+]
+```
+
+---
+
+### Find Resources
+**GET** `/api/v1/terraform/resources`
+
+Find resources by type.
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/resources?resource_type=aws_eks_cluster&account_id=123456789012&top_k=20" \
+  -H "X-API-Key: your-api-key"
 ```
 
 **Response:**
 ```json
 {
+  "resource_type": "aws_eks_cluster",
   "results": [
     {
-      "content": "resource \"aws_eks_cluster\" \"main\" { ... }",
-      "metadata": {
-        "file_path": "/environments/prod/compute/main.tf",
-        "category": "compute",
-        "resource_types": ["aws_eks_cluster"],
-        "environment": "prod"
-      },
-      "relevance_score": 0.94,
-      "chunk_id": "uuid"
+      "resource_name": "main",
+      "file_path": "terraform/eks/main.tf",
+      "content": "resource \"aws_eks_cluster\" \"main\" {...}"
     }
   ],
-  "query": "EKS cluster with managed node groups"
+  "total": 1
 }
 ```
 
 ---
 
-### List Resources
-
-#### `GET /resources`
-
-**Description:** List Terraform resources by type.
-
-**Internal Logic:**
-1. Query ChromaDB with metadata filter on `resource_types`
-2. Extract unique resources from results
-3. Group by resource type
-
-**Query Parameters:**
-- `account_id`: Required
-- `project_id`: Optional
-- `resource_type`: Filter specific type
-- `environment`: Filter by environment
-
----
-
 ### List Modules
+**GET** `/api/v1/terraform/modules`
 
-#### `GET /modules`
+List Terraform modules.
 
-**Description:** List Terraform modules.
-
-**Internal Logic:**
-1. Query for documents where `is_module=true`
-2. Extract module information from parsed data
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/terraform/modules?account_id=123456789012&category=networking" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
@@ -908,104 +962,79 @@ Base Path: `/api/v1/context/state`
 Manages Terraform state file indexing and search.
 
 ### Upload State File
+**POST** `/api/v1/context/state/upload`
 
-#### `POST /upload`
+Upload a Terraform state file for indexing.
 
-**Description:** Upload and index a terraform.tfstate file.
-
-**Internal Logic:**
-1. Receive state file (multipart upload)
-2. Validate file extension (.tfstate or .json)
-3. Parse state file:
-   - Support v3 and v4 state formats
-   - Extract resources from modules
-   - For v4: Parse `resources` array directly
-   - For v3: Parse `modules[].resources`
-4. Convert to `CloudResource` objects:
-   - `resource_type`: Terraform type (aws_instance, etc.)
-   - `resource_id`: Instance ID from state
-   - `resource_name`: Logical name
-   - `state_data`: Full attributes from state
-5. Store in ChromaDB collection: `context__state__{user_id}__{account_id}`
-6. Create embeddings from JSON-serialized state_data
-
-**Request (multipart/form-data):**
-- `file`: .tfstate file
-- `account_id`: AWS account
-- `project_id`: Optional project
-- `environment`: Optional environment
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/state/upload" \
+  -H "X-API-Key: your-api-key" \
+  -F "file=@terraform.tfstate" \
+  -F "account_id=123456789012" \
+  -F "project_id=my-infrastructure" \
+  -F "environment=production"
+```
 
 **Response:**
 ```json
 {
-  "resources_indexed": 47,
-  "account_id": "123456789",
-  "source_type": "tfstate",
-  "errors": []
+  "resources_indexed": 45,
+  "account_id": "123456789012",
+  "source_type": "terraform_state"
 }
 ```
 
 ---
 
 ### List State Resources
+**GET** `/api/v1/context/state/resources`
 
-#### `GET /resources`
+List resources from state files.
 
-**Description:** List resources from indexed state.
-
-**Internal Logic:**
-1. Query state collection with optional filters
-2. Return resource list with metadata
-
-**Query Parameters:**
-- `account_id`: Required
-- `resource_type`: Optional filter
-- `limit`: Max results (default 100)
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/context/state/resources?account_id=123456789012&resource_type=aws_instance&limit=50" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
   "resources": [
     {
-      "context_id": "uuid",
       "resource_type": "aws_instance",
-      "resource_id": "i-1234567890abcdef0",
-      "resource_name": "web_server",
-      "region": "us-east-1",
-      "state_data": {
+      "resource_id": "i-0abc123def456",
+      "name": "web-server",
+      "attributes": {
         "instance_type": "t3.medium",
-        "vpc_id": "vpc-123"
-      },
-      "indexed_at": "2024-01-15T10:30:00Z"
+        "ami": "ami-12345678"
+      }
     }
   ],
-  "total": 47,
-  "account_id": "123456789"
+  "total": 5,
+  "account_id": "123456789012"
 }
 ```
 
 ---
 
 ### Search State
+**POST** `/api/v1/context/state/search`
 
-#### `POST /search`
+Semantic search across state resources.
 
-**Description:** Semantic search over state resources.
-
-**Internal Logic:**
-1. Query state collection with semantic search
-2. Match against serialized state_data
-3. Filter by resource_types if specified
-4. Return ranked results
-
-**Request Body:**
-```json
-{
-  "query": "EC2 instances in production VPC",
-  "account_id": "123456789",
-  "resource_types": ["aws_instance"],
-  "top_k": 10
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/state/search" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "EC2 instances running in production",
+    "account_id": "123456789012",
+    "resource_types": ["aws_instance"],
+    "top_k": 10
+  }'
 ```
 
 ---
@@ -1017,23 +1046,9 @@ Base Path: `/api/v1/context/live`
 Fetches and manages live AWS resource state.
 
 ### Fetch Live Resources
+**POST** `/api/v1/context/live/fetch`
 
-#### `POST /fetch`
-
-**Description:** Fetch current resources from AWS APIs.
-
-**Internal Logic:**
-1. Initialize AWS boto3 clients with credentials:
-   - Use provided credentials OR
-   - Fall back to configured/IAM credentials
-2. For each requested resource_type:
-   - Call appropriate AWS API (describe_instances, list_clusters, etc.)
-   - Handle pagination for large result sets
-   - Transform to `CloudResource` objects
-3. If `index_results=true`:
-   - Store in ChromaDB: `context__live__{user_id}__{account_id}`
-   - Create embeddings from state_data
-4. Return counts by resource type
+Fetch live AWS resources and optionally index them.
 
 **Supported Resource Types:**
 - `ec2`, `vpc`, `subnet`, `security_group`
@@ -1041,124 +1056,95 @@ Fetches and manages live AWS resource state.
 - `alb`, `nlb`, `dynamodb`, `elasticache`
 - `ecs`, `iam_role`, `route53`
 
-**Request Body:**
-```json
-{
-  "account_id": "123456789",
-  "region": "us-east-1",
-  "resource_types": ["ec2", "eks", "rds"],
-  "index_results": true,
-  "aws_access_key_id": "optional",
-  "aws_secret_access_key": "optional"
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/live/fetch" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "account_id": "123456789012",
+    "region": "us-west-2",
+    "resource_types": ["ec2", "eks", "rds", "s3"],
+    "index_results": true,
+    "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+    "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "resources_fetched": 25,
-  "resources_indexed": 25,
+  "resources_fetched": 127,
+  "resources_indexed": 127,
   "resource_types": {
-    "ec2": 10,
-    "eks": 2,
-    "rds": 13
-  },
-  "account_id": "123456789",
-  "region": "us-east-1",
-  "errors": []
+    "ec2": 45,
+    "eks": 3,
+    "rds": 12,
+    "s3": 67
+  }
 }
 ```
 
 ---
 
 ### Sync Live State
+**POST** `/api/v1/context/live/sync`
 
-#### `POST /sync`
+Sync and update the index with current live state.
 
-**Description:** Sync indexed resources with current AWS state.
-
-**Internal Logic:**
-1. Get existing indexed live resources
-2. Fetch current live resources from AWS
-3. Compare and categorize:
-   - **Added**: Resources in live but not indexed
-   - **Updated**: Resources in both (update indexed)
-   - **Removed**: Resources indexed but not in live
-   - **Unchanged**: Resources identical in both
-4. Update ChromaDB collection accordingly
-5. Return sync statistics
-
-**Request Body:**
-```json
-{
-  "account_id": "123456789",
-  "region": "us-east-1",
-  "resource_types": ["ec2", "eks"]
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/live/sync" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "account_id": "123456789012",
+    "region": "us-west-2",
+    "resource_types": ["ec2", "rds"]
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "synced": 15,
-  "added": 3,
-  "updated": 10,
+  "synced": true,
+  "added": 5,
+  "updated": 12,
   "removed": 2,
-  "unchanged": 5,
-  "account_id": "123456789",
-  "region": "us-east-1",
-  "errors": []
+  "unchanged": 108
 }
 ```
 
 ---
 
 ### Compare State vs Live
+**GET** `/api/v1/context/live/compare/{resource_type}`
 
-#### `GET /compare/{resource_type}`
+Compare Terraform state with live AWS resources to detect drift.
 
-**Description:** Compare Terraform state with live AWS resources.
-
-**Internal Logic:**
-1. Retrieve indexed state resources of type
-2. Fetch live resources of same type
-3. Build comparison:
-   - **state_only**: Resources in state but not live (deleted?)
-   - **live_only**: Resources in live but not state (unmanaged?)
-   - **differences**: Resources with attribute differences
-   - **matched**: Resources identical in both
-4. Calculate drift detection status
-
-**Query Parameters:**
-- `account_id`: Required
-- `region`: AWS region (default us-east-1)
-- `resource_id`: Optional specific resource
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/context/live/compare/aws_instance?account_id=123456789012&region=us-west-2" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
-  "resource_type": "aws_instance",
-  "account_id": "123456789",
-  "region": "us-east-1",
-  "state_only": [
-    {"resource_id": "i-deleted", "resource_type": "aws_instance"}
-  ],
-  "live_only": [
-    {"resource_id": "i-unmanaged", "resource_type": "aws_instance"}
-  ],
+  "state_only": ["i-old123456"],
+  "live_only": ["i-new789012"],
   "differences": [
     {
-      "resource_id": "i-12345",
-      "resource_type": "aws_instance",
-      "state_value": {"instance_type": "t3.small"},
-      "live_value": {"instance_type": "t3.medium"},
-      "differences": [
-        {"key": "instance_type", "state_value": "t3.small", "live_value": "t3.medium"}
-      ],
-      "drift_detected": true
+      "resource_id": "i-abc123",
+      "diffs": {
+        "instance_type": {
+          "state": "t3.small",
+          "live": "t3.medium"
+        }
+      }
     }
   ],
-  "matched": 8,
+  "matched": 40,
   "drift_detected": true
 }
 ```
@@ -1166,16 +1152,15 @@ Fetches and manages live AWS resource state.
 ---
 
 ### List Live Resources
+**GET** `/api/v1/context/live/resources`
 
-#### `GET /resources`
+List indexed live resources.
 
-**Description:** List indexed live resources.
-
-**Query Parameters:**
-- `account_id`: Required
-- `resource_type`: Optional filter
-- `region`: Optional filter
-- `limit`: Max results
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/context/live/resources?account_id=123456789012&resource_type=ec2&region=us-west-2&limit=100" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
@@ -1186,92 +1171,124 @@ Base Path: `/api/v1/context/general`
 Stores miscellaneous context information.
 
 ### Store General Context
+**POST** `/api/v1/context/general/`
 
-#### `POST /`
+Store arbitrary context information.
 
-**Description:** Store arbitrary context information.
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/general/" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Production EKS cluster requires minimum 3 nodes for high availability. Use m5.large instances for worker nodes.",
+    "context_type": "best_practice",
+    "metadata": {
+      "source": "architecture_review",
+      "author": "platform-team"
+    },
+    "account_id": "123456789012",
+    "project_id": "my-infrastructure"
+  }'
+```
 
-**Internal Logic:**
-1. Generate context ID (UUID4)
-2. Store in ChromaDB: `context__general__{user_id}`
-3. Create embedding from content
-4. Store metadata including custom fields
-
-**Request Body:**
+**Response:**
 ```json
 {
-  "content": "Production environment uses us-east-1 and us-west-2 for HA",
-  "context_type": "architecture",
-  "metadata": {
-    "regions": ["us-east-1", "us-west-2"],
-    "criticality": "high"
-  },
-  "account_id": "123456789",
-  "project_id": "main-infrastructure"
+  "context_id": "ctx_lmn789",
+  "indexed_at": "2024-01-15T11:00:00Z"
 }
 ```
 
 ---
 
 ### Search General Context
+**POST** `/api/v1/context/general/search`
 
-#### `POST /search`
+Semantic search across general context.
 
-**Description:** Search stored general context.
-
-**Request Body:**
-```json
-{
-  "query": "production regions",
-  "top_k": 5
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/general/search" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "EKS cluster node requirements",
+    "account_id": "123456789012",
+    "top_k": 5
+  }'
 ```
 
 ---
 
 ### List General Context
+**GET** `/api/v1/context/general/`
 
-#### `GET /`
+List stored context entries.
 
-**Description:** List stored general context entries.
-
-**Query Parameters:**
-- `context_type`: Filter by type
-- `account_id`: Filter by account
-- `project_id`: Filter by project
-- `limit`: Max results
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/context/general/?context_type=best_practice&account_id=123456789012&limit=50" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
 ### Get Context
+**GET** `/api/v1/context/general/{context_id}`
 
-#### `GET /{context_id}`
+Get a specific context entry.
 
-**Description:** Retrieve specific context entry.
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/context/general/ctx_lmn789" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
 ### Delete Context
+**DELETE** `/api/v1/context/general/{context_id}`
 
-#### `DELETE /{context_id}`
+Delete a context entry.
 
-**Description:** Delete context entry.
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/context/general/ctx_lmn789" \
+  -H "X-API-Key: your-api-key"
+```
 
 ---
 
-### Batch Store
+### Batch Store Context
+**POST** `/api/v1/context/general/batch`
 
-#### `POST /batch`
+Store multiple context entries at once.
 
-**Description:** Store multiple context entries at once.
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/context/general/batch" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "content": "Use AWS EKS for managed Kubernetes",
+      "context_type": "recommendation",
+      "account_id": "123456789012"
+    },
+    {
+      "content": "RDS instances should have Multi-AZ enabled",
+      "context_type": "best_practice",
+      "account_id": "123456789012"
+    }
+  ]'
+```
 
-**Request Body:**
+**Response:**
 ```json
 {
-  "contexts": [
-    {"content": "...", "context_type": "..."},
-    {"content": "...", "context_type": "..."}
-  ]
+  "stored": 2,
+  "context_ids": ["ctx_abc123", "ctx_def456"]
 }
 ```
 
@@ -1284,29 +1301,21 @@ Base Path: `/api/v1/unified`
 Cross-index search and context aggregation.
 
 ### Unified Search
+**POST** `/api/v1/unified/search`
 
-#### `POST /search`
+Search across all index groups simultaneously.
 
-**Description:** Search across all index groups simultaneously.
-
-**Internal Logic:**
-1. For each requested index group, perform parallel searches:
-   - **TERRAFORM**: Semantic search on terraform collections
-   - **MEMORY**: Search session + longterm memory collections
-   - **DECISIONS**: Search decision collection
-   - **CONTEXT**: Search state + live + general collections
-2. Each search uses same query with semantic similarity
-3. Aggregate results by group
-4. Return unified result object
-
-**Request Body:**
-```json
-{
-  "query": "EKS cluster configuration with node groups",
-  "index_groups": ["terraform", "memory", "context"],
-  "session_id": "optional-for-session-specific-results",
-  "top_k_per_group": 5
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/unified/search" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How to configure EKS cluster networking",
+    "index_groups": ["terraform", "memory", "context"],
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "top_k_per_group": 5
+  }'
 ```
 
 **Response:**
@@ -1314,80 +1323,72 @@ Cross-index search and context aggregation.
 {
   "results": {
     "terraform": [
-      {"content": "...", "metadata": {...}, "relevance_score": 0.95}
+      {
+        "content": "resource \"aws_eks_cluster\" ...",
+        "relevance_score": 0.92
+      }
     ],
     "memory": [
-      {"memory": {...}, "relevance_score": 0.88}
-    ],
-    "decisions": [
-      {"decision": {...}, "relevance_score": 0.82}
+      {
+        "content": "User prefers VPC CNI for EKS networking",
+        "relevance_score": 0.88
+      }
     ],
     "context": [
-      {"context": {...}, "relevance_score": 0.79}
+      {
+        "content": "EKS networking best practices...",
+        "relevance_score": 0.85
+      }
     ]
-  },
-  "query": "EKS cluster configuration with node groups"
+  }
 }
 ```
 
 ---
 
 ### Build Agent Context
+**POST** `/api/v1/unified/agent-context`
 
-#### `POST /agent-context`
+Build optimized context for an AI agent.
 
-**Description:** Build comprehensive context for AI agent consumption.
-
-**Internal Logic:**
-1. Calculate character budget per group based on max_context_tokens
-2. For each included group, retrieve and format context:
-   - **SESSION**: Recent messages (last 10)
-   - **MEMORY**: Relevant memories with relevance scores
-   - **DECISIONS**: Past similar decisions with reasoning
-   - **TERRAFORM**: Relevant terraform configurations
-   - **CONTEXT**: Cloud state information
-3. Format each section with headers
-4. Combine into single context string
-5. Track source counts for attribution
-
-**Request Body:**
-```json
-{
-  "session_id": "uuid",
-  "query": "Deploy a new EKS cluster",
-  "include_groups": ["terraform", "memory", "context"],
-  "max_context_tokens": 4000
-}
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/unified/agent-context" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "query": "Create an EKS cluster with Fargate",
+    "include_groups": ["terraform", "memory", "context"],
+    "max_context_tokens": 4000
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "context": "## Session Context\n[user]: Previous discussion...\n\n## Relevant Memories\n- User prefers managed node groups...\n\n## Terraform Context\n- File: /prod/eks/main.tf\n  Content: resource \"aws_eks_cluster\"...\n\n## Cloud Context\n- Resource: aws_eks_cluster/main-cluster\n  Region: us-east-1",
+  "context": "Based on your infrastructure and preferences:\n\n## Relevant Terraform Code\n...\n\n## Related Memories\n...\n\n## Best Practices\n...",
   "sources": {
-    "sessions": 1,
-    "memories": 3,
-    "terraform": 5,
-    "context": 4
+    "terraform": 3,
+    "memory": 2,
+    "context": 2
   },
-  "session_id": "uuid"
+  "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
 ---
 
 ### Get All Stats
+**GET** `/api/v1/unified/stats`
 
-#### `GET /stats`
+Get statistics for all index groups.
 
-**Description:** Get statistics for all index groups.
-
-**Internal Logic:**
-1. For each index group:
-   - Count collections matching user pattern
-   - Sum document counts across collections
-   - Gather group-specific metrics
-2. Return aggregated statistics
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/unified/stats" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
@@ -1395,75 +1396,46 @@ Cross-index search and context aggregation.
   "stats": [
     {
       "index_group": "terraform",
-      "collections": 5,
-      "total_documents": 234,
-      "details": {
-        "collection_names": ["terraform__semantic__user123__acc1__proj1", ...]
-      }
+      "document_count": 150,
+      "chunk_count": 450
     },
     {
       "index_group": "memory",
-      "collections": 3,
-      "total_documents": 156,
-      "details": {
-        "session_memories": 89,
-        "longterm_memories": 45,
-        "decisions": 22
-      }
+      "document_count": 75,
+      "chunk_count": 75
     },
     {
       "index_group": "context",
-      "collections": 4,
-      "total_documents": 512,
-      "details": {
-        "state_resources": 234,
-        "live_resources": 198,
-        "general_contexts": 80
-      }
-    },
-    {
-      "index_group": "sessions",
-      "collections": 1,
-      "total_documents": 8,
-      "details": {
-        "session_count": 8,
-        "active_sessions": 5
-      }
+      "document_count": 30,
+      "chunk_count": 60
     }
-  ],
-  "user_id": "user123"
+  ]
 }
 ```
 
 ---
 
 ### Cleanup User Data
+**DELETE** `/api/v1/unified/cleanup`
 
-#### `DELETE /cleanup`
+Delete all data for the current user.
 
-**Description:** Delete all data for the authenticated user.
-
-**Internal Logic:**
-1. Require `confirm=true` query parameter
-2. List and delete all terraform collections
-3. List and delete all memory collections
-4. List and delete all context collections
-5. Sessions expire naturally via TTL
-6. Return deletion counts
-
-**Query Parameters:**
-- `confirm` (boolean, required): Must be true
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/unified/cleanup?confirm=true" \
+  -H "X-API-Key: your-api-key"
+```
 
 **Response:**
 ```json
 {
   "deleted": true,
-  "user_id": "user123",
+  "user_id": "user_123",
   "counts": {
-    "terraform": 5,
-    "memory": 3,
-    "context": 4,
-    "sessions": 0
+    "terraform": 150,
+    "memory": 75,
+    "context": 30,
+    "sessions": 5
   }
 }
 ```
@@ -1471,17 +1443,246 @@ Cross-index search and context aggregation.
 ---
 
 ### Health Check
+**GET** `/api/v1/unified/health`
 
-#### `GET /health`
+Check unified search service health.
 
-**Description:** Health check for unified search service.
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/unified/health" \
+  -H "X-API-Key: your-api-key"
+```
+
+---
+
+## Documents API
+
+Base Path: `/api/v1/documents`
+
+Upload and manage documents for RAG.
+
+### Upload Document
+**POST** `/api/v1/documents/upload`
+
+Upload and index a document (PDF, DOCX, TXT, MD, CSV).
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents/upload" \
+  -H "X-API-Key: your-api-key" \
+  -F "file=@architecture-guide.pdf"
+```
 
 **Response:**
 ```json
 {
-  "status": "healthy",
-  "service": "unified-search",
-  "index_groups": ["terraform", "sessions", "memory", "context"]
+  "document_id": "doc_uvw123",
+  "filename": "architecture-guide.pdf",
+  "chunks_created": 25
+}
+```
+
+---
+
+### Upload Text
+**POST** `/api/v1/documents/upload-text`
+
+Upload raw text for indexing.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents/upload-text" \
+  -H "X-API-Key: your-api-key" \
+  -F "text=This is the content to be indexed. It contains important information about our infrastructure." \
+  -F "source_name=infrastructure-notes"
+```
+
+**Response:**
+```json
+{
+  "document_id": "doc_xyz456",
+  "filename": "infrastructure-notes",
+  "chunks_created": 1
+}
+```
+
+---
+
+### List Documents
+**GET** `/api/v1/documents/`
+
+List all uploaded documents.
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/documents/" \
+  -H "X-API-Key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "documents": [
+    {
+      "document_id": "doc_uvw123",
+      "filename": "architecture-guide.pdf",
+      "uploaded_at": "2024-01-15T11:30:00Z",
+      "chunks": 25
+    }
+  ]
+}
+```
+
+---
+
+### Delete Document
+**DELETE** `/api/v1/documents/{document_id}`
+
+Delete a document and its chunks.
+
+**Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/documents/doc_uvw123" \
+  -H "X-API-Key: your-api-key"
+```
+
+---
+
+### Get Stats
+**GET** `/api/v1/documents/stats`
+
+Get document collection statistics.
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/documents/stats" \
+  -H "X-API-Key: your-api-key"
+```
+
+---
+
+## Chat API
+
+Base Path: `/api/v1/chat`
+
+RAG-enhanced chat with LLM providers.
+
+### Chat
+**POST** `/api/v1/chat/`
+
+Send a message and get a RAG-enhanced response.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/chat/" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How do I create an EKS cluster with managed node groups?",
+    "provider": "bedrock",
+    "model_id": "anthropic.claude-3-sonnet-20240229-v1:0",
+    "top_k": 5,
+    "temperature": 0.7,
+    "max_tokens": 1000
+  }'
+```
+
+**Response:**
+```json
+{
+  "answer": "To create an EKS cluster with managed node groups, you can use the following Terraform configuration...",
+  "sources": [
+    {
+      "content": "resource \"aws_eks_cluster\" ...",
+      "file_path": "terraform/eks/main.tf",
+      "relevance_score": 0.94
+    }
+  ],
+  "provider": "bedrock",
+  "model_id": "anthropic.claude-3-sonnet-20240229-v1:0"
+}
+```
+
+---
+
+### Chat Stream
+**POST** `/api/v1/chat/stream`
+
+Stream a chat response using Server-Sent Events.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/chat/stream" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "query": "Explain the VPC module structure",
+    "provider": "anthropic",
+    "model_id": "claude-3-sonnet",
+    "temperature": 0.5
+  }'
+```
+
+**Response (Server-Sent Events):**
+```
+data: {"chunk": "The VPC module"}
+data: {"chunk": " is structured"}
+data: {"chunk": " to provide..."}
+data: {"done": true, "sources": [...]}
+```
+
+---
+
+### Query Documents
+**POST** `/api/v1/chat/query`
+
+Query documents without generating a response (retrieval only).
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/chat/query" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "S3 bucket configuration",
+    "top_k": 10
+  }'
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "content": "resource \"aws_s3_bucket\" \"main\" {...}",
+      "metadata": {
+        "file_path": "terraform/storage/s3.tf"
+      },
+      "relevance_score": 0.91
+    }
+  ]
+}
+```
+
+---
+
+### List Providers
+**GET** `/api/v1/chat/providers`
+
+List available LLM providers.
+
+**Example:**
+```bash
+curl -X GET "http://localhost:8000/api/v1/chat/providers" \
+  -H "X-API-Key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "providers": ["bedrock", "openai", "anthropic"],
+  "default": "bedrock"
 }
 ```
 
@@ -1491,33 +1692,136 @@ Cross-index search and context aggregation.
 
 All endpoints return consistent error responses:
 
+### 400 Bad Request
 ```json
 {
-  "detail": "Error message describing the issue"
+  "detail": "Invalid request: missing required field 'query'"
 }
 ```
 
-**Common HTTP Status Codes:**
-- `400`: Bad Request - Invalid input
-- `401`: Unauthorized - Missing/invalid authentication
-- `404`: Not Found - Resource doesn't exist
-- `422`: Validation Error - Request body validation failed
-- `500`: Internal Server Error - Server-side error
+### 401 Unauthorized
+```json
+{
+  "detail": "Missing authentication credentials"
+}
+```
+
+### 403 Forbidden
+```json
+{
+  "detail": "Invalid API key"
+}
+```
+
+### 404 Not Found
+```json
+{
+  "detail": "Session not found: sess_invalid123"
+}
+```
+
+### 413 Payload Too Large
+```json
+{
+  "detail": "File size exceeds maximum limit of 50MB"
+}
+```
+
+### 422 Validation Error
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "importance_score"],
+      "msg": "ensure this value is less than or equal to 1.0",
+      "type": "value_error.number.not_le"
+    }
+  ]
+}
+```
+
+### 500 Internal Server Error
+```json
+{
+  "detail": "An unexpected error occurred. Please try again later."
+}
+```
 
 ---
 
-## Rate Limiting
+## Quick Reference
 
-Currently no rate limiting is implemented. For production deployments, consider adding rate limiting middleware.
+### Endpoint Summary
+
+| Category | Method | Endpoint | Description |
+|----------|--------|----------|-------------|
+| **Health** | GET | `/health` | Service health check |
+| **Health** | GET | `/` | Service info |
+| **Sessions** | POST | `/api/v1/sessions/` | Create session |
+| **Sessions** | GET | `/api/v1/sessions/` | List sessions |
+| **Sessions** | GET | `/api/v1/sessions/{id}` | Get session |
+| **Sessions** | DELETE | `/api/v1/sessions/{id}` | Delete session |
+| **Sessions** | POST | `/api/v1/sessions/{id}/messages` | Add message |
+| **Sessions** | GET | `/api/v1/sessions/{id}/messages` | Get messages |
+| **Sessions** | PUT | `/api/v1/sessions/{id}/context` | Update context |
+| **Sessions** | PUT | `/api/v1/sessions/{id}/state` | Update state |
+| **Sessions** | POST | `/api/v1/sessions/{id}/extend` | Extend TTL |
+| **Memory** | POST | `/api/v1/memory/` | Store memory |
+| **Memory** | POST | `/api/v1/memory/search` | Search memories |
+| **Memory** | GET | `/api/v1/memory/{id}` | Get memory |
+| **Memory** | DELETE | `/api/v1/memory/{id}` | Delete memory |
+| **Memory** | PUT | `/api/v1/memory/{id}/importance` | Update importance |
+| **Memory** | POST | `/api/v1/memory/{id}/promote` | Promote to long-term |
+| **Memory** | GET | `/api/v1/memory/session/{id}` | Get session memories |
+| **Memory** | DELETE | `/api/v1/memory/session/{id}/cleanup` | Cleanup session |
+| **Decisions** | POST | `/api/v1/memory/decisions/` | Store decision |
+| **Decisions** | POST | `/api/v1/memory/decisions/search` | Search decisions |
+| **Decisions** | GET | `/api/v1/memory/decisions/{id}` | Get decision |
+| **Decisions** | GET | `/api/v1/memory/decisions/resource/{id}` | Get by resource |
+| **Terraform** | POST | `/api/v1/terraform/files/upload` | Upload files |
+| **Terraform** | GET | `/api/v1/terraform/files/tree` | Get file tree |
+| **Terraform** | GET | `/api/v1/terraform/files/content/{path}` | Get file |
+| **Terraform** | DELETE | `/api/v1/terraform/files/content/{path}` | Delete file |
+| **Terraform** | GET | `/api/v1/terraform/files/accounts` | List accounts |
+| **Terraform** | GET | `/api/v1/terraform/files/accounts/{id}/projects` | List projects |
+| **Terraform** | GET | `/api/v1/terraform/files/stats` | Get stats |
+| **Terraform** | DELETE | `/api/v1/terraform/files/project` | Delete project |
+| **Terraform** | POST | `/api/v1/terraform/search` | Semantic search |
+| **Terraform** | GET | `/api/v1/terraform/resources` | Find resources |
+| **Terraform** | GET | `/api/v1/terraform/modules` | List modules |
+| **Context** | POST | `/api/v1/context/state/upload` | Upload state |
+| **Context** | GET | `/api/v1/context/state/resources` | List resources |
+| **Context** | POST | `/api/v1/context/state/search` | Search state |
+| **Context** | POST | `/api/v1/context/live/fetch` | Fetch live |
+| **Context** | POST | `/api/v1/context/live/sync` | Sync state |
+| **Context** | GET | `/api/v1/context/live/compare/{type}` | Compare drift |
+| **Context** | GET | `/api/v1/context/live/resources` | List live |
+| **Context** | POST | `/api/v1/context/general/` | Store context |
+| **Context** | POST | `/api/v1/context/general/search` | Search context |
+| **Context** | GET | `/api/v1/context/general/` | List contexts |
+| **Context** | GET | `/api/v1/context/general/{id}` | Get context |
+| **Context** | DELETE | `/api/v1/context/general/{id}` | Delete context |
+| **Context** | POST | `/api/v1/context/general/batch` | Batch store |
+| **Unified** | POST | `/api/v1/unified/search` | Cross-index search |
+| **Unified** | POST | `/api/v1/unified/agent-context` | Build agent context |
+| **Unified** | GET | `/api/v1/unified/stats` | Get all stats |
+| **Unified** | DELETE | `/api/v1/unified/cleanup` | Cleanup user data |
+| **Unified** | GET | `/api/v1/unified/health` | Health check |
+| **Documents** | POST | `/api/v1/documents/upload` | Upload document |
+| **Documents** | POST | `/api/v1/documents/upload-text` | Upload text |
+| **Documents** | GET | `/api/v1/documents/` | List documents |
+| **Documents** | DELETE | `/api/v1/documents/{id}` | Delete document |
+| **Documents** | GET | `/api/v1/documents/stats` | Get stats |
+| **Chat** | POST | `/api/v1/chat/` | Chat |
+| **Chat** | POST | `/api/v1/chat/stream` | Stream chat |
+| **Chat** | POST | `/api/v1/chat/query` | Query documents |
+| **Chat** | GET | `/api/v1/chat/providers` | List providers |
 
 ---
 
-## Changelog
+## Interactive Documentation
 
-### Version 2.0.0
-- Added multi-index architecture
-- Added Sessions API with Redis backend
-- Added Memory and Decisions APIs
-- Added Terraform file management and semantic search
-- Added Context APIs for state and live AWS resources
-- Added Unified Search API for cross-index queries
+Access the interactive API documentation at:
+
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
