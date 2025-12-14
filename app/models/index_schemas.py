@@ -64,12 +64,12 @@ class TerraformHierarchy(BaseModel):
 
 class TerraformMetadata(BaseModel):
     """Metadata for terraform file indexing."""
-    user_id: str
-    account_id: str
-    project_id: str
-    environment: str
-    category: str
-    resource_kind: str
+    user_id: Optional[str] = None
+    account_id: Optional[str] = None
+    project_id: Optional[str] = None
+    environment: Optional[str] = None
+    category: Optional[str] = None
+    resource_kind: Optional[str] = None
     file_type: str
     file_path: str
     is_module: bool = False
@@ -142,8 +142,8 @@ class SessionMessage(BaseModel):
 
 class SessionData(BaseModel):
     """Session data stored in Redis."""
-    session_id: str
-    user_id: str
+    session_id: Optional[str] = None
+    user_id: Optional[str] = None
     model_id: str
     provider: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -156,7 +156,7 @@ class SessionData(BaseModel):
 
 class SessionSummary(BaseModel):
     """Summary info for a session."""
-    session_id: str
+    session_id: Optional[str] = None
     model_id: str
     provider: str
     created_at: datetime
@@ -172,7 +172,7 @@ class SessionSummary(BaseModel):
 class MemoryEntry(BaseModel):
     """Memory entry for ChromaDB."""
     memory_id: str
-    user_id: str
+    user_id: Optional[str] = None
     session_id: Optional[str] = None
     memory_type: MemoryType
     content: str
@@ -229,8 +229,8 @@ class CloudResource(BaseModel):
 class CloudContext(BaseModel):
     """Cloud context from state or live API."""
     context_id: str
-    user_id: str
-    account_id: str
+    user_id: Optional[str] = None
+    account_id: Optional[str] = None
     source_type: ContextSourceType
     resource: CloudResource
     project_id: Optional[str] = None
@@ -606,7 +606,7 @@ class IndexGroupStats(BaseModel):
 class AllStatsResponse(BaseModel):
     """Response with all index group stats."""
     stats: List[IndexGroupStats]
-    user_id: str
+    user_id: Optional[str] = None
 
 
 # Fix forward reference
