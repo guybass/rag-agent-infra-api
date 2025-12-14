@@ -1,8 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import time
+from uuid import uuid4
 
 from app.config import get_settings
+from app.logging_config import get_logger, setup_logging
 from app.api import documents, chat, health
 from app.services.vector_store import VectorStoreService
 from app.services.multi_vector_store import MultiVectorStoreService
@@ -18,6 +22,12 @@ from app.api.v1.unified import search_router as unified_search_router
 
 
 settings = get_settings()
+
+# Setup logging
+logger = setup_logging(
+    level="DEBUG" if settings.debug else "INFO",
+    json_format=not settings.debug,  # JSON in production, readable in dev
+)
 
 
 @asynccontextmanager
@@ -52,6 +62,97 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests and responses."""
+    request_id = str(uuid4())[:8]
+    start_time = time.time()
+
+    # Get client IP
+    client_ip = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+
+    # Log incoming request
+    logger.info(
+        f"Request started",
+        extra={
+            "request_id": request_id,
+            "client_ip": client_ip,
+            "method": request.method,
+            "path": request.url.path,
+        }
+    )
+
+    try:
+        response = await call_next(request)
+        duration_ms = round((time.time() - start_time) * 1000, 2)
+
+        # Log response
+        log_level = "warning" if response.status_code >= 400 else "info"
+        getattr(logger, log_level)(
+            f"Request completed",
+            extra={
+                "request_id": request_id,
+                "client_ip": client_ip,
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            }
+        )
+
+        # Add request ID to response headers
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    except Exception as e:
+        duration_ms = round((time.time() - start_time) * 1000, 2)
+        logger.error(
+            f"Request failed: {str(e)}",
+            extra={
+                "request_id": request_id,
+                "client_ip": client_ip,
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                "error_detail": str(e),
+            },
+            exc_info=True,
+        )
+        raise
+
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with logging."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.error(
+        f"Unhandled exception: {type(exc).__name__}: {str(exc)}",
+        extra={
+            "client_ip": client_ip,
+            "method": request.method,
+            "path": request.url.path,
+            "error_type": type(exc).__name__,
+            "error_detail": str(exc),
+        },
+        exc_info=True,
+    )
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error_type": type(exc).__name__,
+        },
+    )
 
 # Include routers - Core
 app.include_router(health.router, tags=["Health"])
