@@ -6,6 +6,32 @@ import re
 from app.config import get_settings
 
 
+def sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sanitize metadata dict for ChromaDB storage.
+    ChromaDB only accepts: Bool, Int, Float, Str - NOT None.
+
+    Args:
+        metadata: Raw metadata dictionary
+
+    Returns:
+        Sanitized metadata with None values converted to empty strings
+    """
+    sanitized = {}
+    for key, value in metadata.items():
+        if value is None:
+            sanitized[key] = ""  # Convert None to empty string
+        elif isinstance(value, (str, int, float, bool)):
+            sanitized[key] = value
+        elif isinstance(value, list):
+            # Convert lists to comma-separated strings
+            sanitized[key] = ",".join(str(v) for v in value if v is not None)
+        else:
+            # Convert other types to string
+            sanitized[key] = str(value)
+    return sanitized
+
+
 class MultiVectorStoreService:
     """
     Manages multiple ChromaDB collections with consistent naming
@@ -134,9 +160,12 @@ class MultiVectorStoreService:
         if not collection:
             raise ValueError(f"Could not access collection: {collection_name}")
 
+        # Sanitize all metadata to ensure ChromaDB compatibility
+        sanitized_metadatas = [sanitize_metadata(m) for m in metadatas]
+
         collection.add(
             documents=texts,
-            metadatas=metadatas,
+            metadatas=sanitized_metadatas,
             ids=ids,
         )
         return len(texts)
@@ -278,7 +307,8 @@ class MultiVectorStoreService:
         if texts:
             update_kwargs["documents"] = texts
         if metadatas:
-            update_kwargs["metadatas"] = metadatas
+            # Sanitize metadata to ensure ChromaDB compatibility
+            update_kwargs["metadatas"] = [sanitize_metadata(m) for m in metadatas]
 
         collection.update(**update_kwargs)
         return True

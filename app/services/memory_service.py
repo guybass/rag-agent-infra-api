@@ -42,7 +42,7 @@ class MemoryService:
         """Convert memory entry to metadata dict for ChromaDB."""
         return {
             "memory_id": memory.memory_id,
-            "user_id": memory.user_id,
+            "user_id": memory.user_id or "",
             "session_id": memory.session_id or "",
             "memory_type": memory.memory_type.value,
             "importance_score": memory.importance_score,
@@ -413,8 +413,8 @@ class MemoryService:
         """Convert decision to metadata dict."""
         return {
             "decision_id": decision.decision_id,
-            "user_id": decision.user_id,
-            "session_id": decision.session_id,
+            "user_id": decision.user_id or "",
+            "session_id": decision.session_id or "",
             "decision_type": decision.decision_type,
             "confidence_score": decision.confidence_score,
             "created_at": decision.created_at.isoformat(),
