@@ -568,7 +568,7 @@ class UnifiedSearchRequest(BaseModel):
 
 class AgentContextRequest(BaseModel):
     """Request to build agent context."""
-    session_id: str
+    session_id: Optional[str] = None
     query: str = Field(..., min_length=1)
     include_groups: List[IndexGroup] = [IndexGroup.TERRAFORM, IndexGroup.MEMORY, IndexGroup.CONTEXT]
     max_context_tokens: int = Field(default=4000, ge=500, le=16000)

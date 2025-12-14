@@ -205,18 +205,25 @@ class MemoryService:
         for mtype in types_to_search:
             collection_name = self._get_collection_name(user_id, mtype)
 
-            # Build where filter
-            where = {}
+            # Build where filter - ChromaDB requires $and for multiple conditions
+            conditions = []
             if session_id and mtype == MemoryType.SESSION:
-                where["session_id"] = session_id
+                conditions.append({"session_id": session_id})
             if min_importance > 0:
-                where["importance_score"] = {"$gte": min_importance}
+                conditions.append({"importance_score": {"$gte": min_importance}})
+
+            # Wrap multiple conditions in $and, single condition as-is
+            where = None
+            if len(conditions) == 1:
+                where = conditions[0]
+            elif len(conditions) > 1:
+                where = {"$and": conditions}
 
             results = self.vector_store.query(
                 collection_name=collection_name,
                 query_text=query,
                 top_k=top_k,
-                where=where if where else None,
+                where=where,
             )
 
             for i, doc in enumerate(results["documents"]):
@@ -572,19 +579,27 @@ class MemoryService:
             user_id=user_id,
         )
 
-        where = {}
+        # Build filter conditions - ChromaDB requires $and for multiple conditions
+        conditions = []
         if decision_type:
-            where["decision_type"] = decision_type
+            conditions.append({"decision_type": decision_type})
         if session_id:
-            where["session_id"] = session_id
+            conditions.append({"session_id": session_id})
         if min_confidence > 0:
-            where["confidence_score"] = {"$gte": min_confidence}
+            conditions.append({"confidence_score": {"$gte": min_confidence}})
+
+        # Wrap multiple conditions in $and, single condition as-is
+        where = None
+        if len(conditions) == 1:
+            where = conditions[0]
+        elif len(conditions) > 1:
+            where = {"$and": conditions}
 
         results = self.vector_store.query(
             collection_name=collection_name,
             query_text=query,
             top_k=top_k,
-            where=where if where else None,
+            where=where,
         )
 
         search_results = []
