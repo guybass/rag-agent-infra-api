@@ -592,7 +592,7 @@ class AgentContextResponse(BaseModel):
     """Response with built agent context."""
     context: str
     sources: Dict[str, int]
-    session_id: str
+    session_id: Optional[str] = None
 
 
 class IndexGroupStats(BaseModel):
